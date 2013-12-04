@@ -1,16 +1,18 @@
 package burp;
 
-import oauth.signpost.basic.DefaultOAuthConsumer;
-import oauth.signpost.http.HttpRequest;
-import oauth.signpost.OAuthConsumer;
-import oauth.signpost.exception.OAuthException;
+import java.util.List;
 
 public class BurpExtender implements IBurpExtender, IHttpListener
 {
+	protected IExtensionHelpers helpers;
+	protected String cookie_value = null;
+	public static final String COOKIE_NAME = ".ASPXFORMSAUTH";
+
 	@Override
 	public void registerExtenderCallbacks(IBurpExtenderCallbacks callbacks)
 	{
-		callbacks.setExtensionName("OAuth");
+		helpers = callbacks.getHelpers();
+		callbacks.setExtensionName("AspxFormAuth");
 		callbacks.registerHttpListener(this);
 	}
 
@@ -19,16 +21,33 @@ public class BurpExtender implements IBurpExtender, IHttpListener
 	{
 		if (messageIsRequest)
 		{
-			HttpRequest req = new BurpHttpRequestWrapper(messageInfo);
-			OAuthConsumer consumer = new DefaultOAuthConsumer(
-					OAuthConfig.getConsumerKey(),
-					OAuthConfig.getConsumerSecret());
-			consumer.setTokenWithSecret(OAuthConfig.getToken(),
-					OAuthConfig.getTokenSecret());
-			try {
-				consumer.sign(req);
-			} catch (OAuthException oae) {
-				oae.printStackTrace();
+			synchronized (this) {
+				if (cookie_value == null) return;
+			}
+			byte[] request = messageInfo.getRequest();
+			IRequestInfo ri = helpers.analyzeRequest(request);
+			List<IParameter> parameters = ri.getParameters();
+			for (IParameter parameter : parameters) {
+				if (parameter.getType() == IParameter.PARAM_COOKIE &&
+						parameter.getName().equals(COOKIE_NAME)) {
+					synchronized (this) {
+						messageInfo.setRequest(helpers.updateParameter(request,
+									helpers.buildParameter(COOKIE_NAME, cookie_value,
+										IParameter.PARAM_COOKIE)));
+					}
+				}
+			}
+		}
+		else
+		{
+			IResponseInfo ri = helpers.analyzeResponse(messageInfo.getResponse());
+			List<ICookie> cookies = ri.getCookies();
+			for (ICookie cookie : cookies) {
+				if (cookie.getName().equals(COOKIE_NAME)) {
+					synchronized (this) {
+						cookie_value = cookie.getValue();
+					}
+				}
 			}
 		}
 	}
